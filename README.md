@@ -354,10 +354,12 @@ are added and then multiplied by the group's optional `boost`. Leaf boosts are
 applied to the leaf BM25 score first.
 
 Leaves can select indexed fields with a JSON string array and choose
-`standard`, `autocomplete`, `phrase`, `phrase_prefix`, `wildcard`, or `regex`
-query mode independently. Expansion controls and field scoring configuration
-remain macro-level settings so all leaves share the same resource limits and
-field model. `scoring_model := 'bm25f'` uses canonical BM25F with optional
+`standard`, `autocomplete`, `phrase`, `phrase_prefix`, `near`, `wildcard`, or
+`regex` query mode independently. A `near` leaf takes its own optional
+`near_distance`, so one clause can require proximity while another does not.
+Expansion controls and field scoring configuration remain macro-level settings
+so all leaves share the same resource limits and field model.
+`scoring_model := 'bm25f'` uses canonical BM25F with optional
 `field_weights` and per-field length normalization through `field_b`;
 `best_fields` selects the strongest field and optionally incorporates the
 others through `tie_breaker`. Ordinary leaves reuse the non-pattern layered

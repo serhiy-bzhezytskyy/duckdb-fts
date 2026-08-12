@@ -128,6 +128,16 @@ SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_m
 ----
 near_distance must be a non-negative integer
 
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": -1}')
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": null}')
+----
+near_distance must be a non-negative integer
+
 # The span arithmetic adds one, so the maximum must saturate rather than overflow.
 query I
 SELECT count(*)
@@ -353,3 +363,108 @@ statement error
 SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'nearby')
 ----
 query_mode must be one of standard, autocomplete, phrase, phrase_prefix, near, wildcard, or regex
+
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine absentword", "query_mode": "near", "near_distance": 1000}')
+----
+0
+
+# The structured surface takes near_distance per leaf.
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": 0}')
+----
+[adjacent, reversed]
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": 2}')
+----
+[adjacent, gap2, reversed, split]
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25_query('{
+    "must": [{"query": "machine learning", "query_mode": "near", "near_distance": 10}],
+    "must_not": [{"query": "six"}]
+}')
+----
+[adjacent, gap2, reversed, split]
+
+query I
+SELECT (
+    SELECT count(*) FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near"}')
+) = (
+    SELECT count(*) FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near')
+)
+----
+true
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "slp": 2}')
+----
+unknown key
+
+# A near leaf composes with should, must_not, and a wildcard leaf.
+statement ok
+CREATE TABLE near_boolean(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_boolean VALUES
+    ('both_clauses', 'machine learning with kiwi'),
+    ('near_only',    'machine learning plain'),
+    ('kiwi_only',    'kiwi standalone text'),
+    ('neither',      'unrelated words here')
+
+statement ok
+PRAGMA create_fts_index('near_boolean', 'id', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_boolean.search_layered_bm25_query('{
+    "should": [{"query": "machine learning", "query_mode": "near", "near_distance": 0}, {"query": "kiwi"}],
+    "minimum_should_match": 2
+}')
+----
+[both_clauses]
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_boolean.search_layered_bm25_query('{
+    "must": [{"query": "kiwi"}],
+    "must_not": [{"query": "machine learning", "query_mode": "near", "near_distance": 0}]
+}')
+----
+[kiwi_only]
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_boolean.search_layered_bm25_query('{
+    "must": [{"query": "machine learning", "query_mode": "near", "near_distance": 0}, {"query": "kiw*", "query_mode": "wildcard"}]
+}')
+----
+[both_clauses]
+
+# A single near leaf scores as the standalone near query, and boost scales it.
+query I
+SELECT (SELECT score FROM fts_main_near_boolean.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": 0}') WHERE docname = 'near_only')
+     = (SELECT score FROM fts_main_near_boolean.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 0) WHERE docname = 'near_only')
+----
+true
+
+query I
+SELECT (SELECT score FROM fts_main_near_boolean.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": 0, "boost": 2.0}') WHERE docname = 'near_only')
+     = 2 * (SELECT score FROM fts_main_near_boolean.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 0) WHERE docname = 'near_only')
+----
+true
+
+# Under should, a near leaf and a standard leaf contribute their own scores.
+query I
+SELECT abs((SELECT score FROM fts_main_near_boolean.search_layered_bm25_query('{
+        "should": [{"query": "machine learning", "query_mode": "near", "near_distance": 0}, {"query": "kiwi"}]
+    }') WHERE docname = 'both_clauses')
+    - ((SELECT score FROM fts_main_near_boolean.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 0) WHERE docname = 'both_clauses')
+     + (SELECT score FROM fts_main_near_boolean.search_layered_bm25('kiwi') WHERE docname = 'both_clauses'))) < 1e-12
+----
+true
