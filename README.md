@@ -45,7 +45,7 @@ create_fts_index(input_table, input_id, *input_values, stemmer = 'porter',
 | `overwrite` | `BOOLEAN` | Whether to overwrite an existing index on a table. Defaults to `0` |
 | `incremental` | `BOOLEAN` | Whether to maintain the FTS index with triggers after inserts and deletes on the input table. Defaults to `0` |
 | `cluster_terms` | `BOOLEAN` | Whether to physically order the generated `terms` table by `termid`, `fieldid`, and `docid`. This can improve query-time pruning for direct reads from the FTS tables. Defaults to `0` |
-| `layered_search` | `BOOLEAN` | Whether to build the dictionary sidecars, positional postings, and layered search macros used by expanded, autocomplete, phrase, phrase-prefix, wildcard, and regex queries. This implies `cluster_terms`. Defaults to `0` |
+| `layered_search` | `BOOLEAN` | Whether to build the dictionary sidecars, positional postings, and layered search macros used by expanded, autocomplete, phrase, phrase-prefix, near, wildcard, and regex queries. This implies `cluster_terms`. Defaults to `0` |
 
 <!-- markdownlint-enable MD056 -->
 
@@ -186,7 +186,8 @@ filtering, and BM25 parameters as the base FTS index.
 | `enable_fuzzy` | `BOOLEAN` | Whether to include Damerau-Levenshtein fuzzy alternatives. Defaults to `true` |
 | `enable_short_fuzzy` | `BOOLEAN` | Whether to use a length-clustered path for short fuzzy alternatives. Defaults to `true` |
 | `expand_exact_terms` | `BOOLEAN` | Whether to also expand a query term that already has an exact dictionary match. Defaults to `false` |
-| `query_mode` | `VARCHAR` | Query execution mode. `standard` uses exact, prefix, substring, and fuzzy dictionary expansion; `autocomplete` keeps preceding tokens exact and matches the final token by raw-token prefix; `phrase` requires exact order and adjacency; `phrase_prefix` treats the final phrase token as a raw-token prefix; `wildcard` matches `*` and `?` patterns; `regex` matches a conservative flat RE2 subset. Defaults to `standard` |
+| `near_distance` | `BIGINT` | Tokens permitted between the first and the last query term in `near` mode, ignored otherwise. Must be a non-negative integer. Counted once across the whole match, and intervening query terms count toward it. `0` means the terms are consecutive. This is `NEAR` `N` from SQLite's FTS5, and shares its default of `10` |
+| `query_mode` | `VARCHAR` | Query execution mode. `standard` uses exact, prefix, substring, and fuzzy dictionary expansion; `autocomplete` keeps preceding tokens exact and matches the final token by raw-token prefix; `phrase` requires exact order and adjacency; `phrase_prefix` treats the final phrase token as a raw-token prefix; `near` requires every term in one field within `near_distance` tokens of each other, in any order; `wildcard` matches `*` and `?` patterns; `regex` matches a conservative flat RE2 subset. Defaults to `standard` |
 | `field_weights` | `MAP(VARCHAR, DOUBLE)` | Non-negative finite weights for indexed fields. Omitted fields have weight `1.0`. Defaults to `NULL` |
 | `field_b` | `MAP(VARCHAR, DOUBLE)` | Per-field BM25 length-normalization parameters. Values must be between `0.0` and `1.0`; omitted fields inherit `b`. Defaults to `NULL` |
 | `scoring_model` | `VARCHAR` | Field scoring model: `bm25f` or `best_fields`. Defaults to `bm25f` |
@@ -224,6 +225,19 @@ unfinished raw token through the prefix sidecar. `term_limit` bounds those
 deterministically ordered completions; document-frequency filters and fuzzy or
 substring expansion are not applied. A one-token phrase uses standard mode,
 while a one-token phrase-prefix uses autocomplete mode.
+
+Near mode uses the same positional postings to require that every query term
+occurs in one indexed field, in any order, with at most `near_distance` tokens
+between the first and the last of them. The distance is counted once across the
+whole match rather than for each pair, and intervening query terms count toward
+it, so two terms need `near_distance = 0` to be adjacent while three consecutive
+terms need `1`. As in phrase mode, removed stopwords retain their positional gap, so a
+stopword between two terms consumes distance. A term repeated in the query
+counts once, and quoted phrases are not supported; the query is a set of
+distinct terms. Near mode matches exact dictionary terms, so prefix, fuzzy, and
+substring expansion are not applied, and a term that occurs in no document
+disqualifies every document. `near_distance` is `NEAR` `N` from SQLite's FTS5
+and shares its default of `10`.
 
 Wildcard and regex modes treat the complete `query_string` as one whole-token
 pattern and match it verbatim against the normalized raw-term dictionary.

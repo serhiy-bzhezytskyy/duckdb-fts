@@ -1,0 +1,355 @@
+# name: test/sql/fts/test_near_search.test
+# description: Proximity search — query terms within a bounded number of intervening tokens
+# group: [fts]
+
+require skip_reload
+
+require fts
+
+require json
+
+require no_alternative_verify
+
+statement ok
+CREATE TABLE near_docs(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_docs VALUES
+    ('adjacent', 'machine learning is useful'),
+    ('gap2',     'machine assisted deep learning'),
+    ('gap6',     'machine one two three four five six learning'),
+    ('reversed', 'learning machine basics'),
+    ('only_one', 'machine intelligence'),
+    ('split',    'machine intelligence. learning theory')
+
+statement ok
+PRAGMA create_fts_index('near_docs', 'id', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 0)
+----
+[adjacent, reversed]
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 2)
+----
+[adjacent, gap2, reversed, split]
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 10)
+----
+[adjacent, gap2, gap6, reversed, split]
+
+# The distance spans the whole match and counts the intervening query terms, so
+# three terms with two tokens between the outermost need near_distance 2, not 1.
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25('machine deep learning', query_mode := 'near', near_distance := 2)
+----
+[gap2]
+
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine deep learning', query_mode := 'near', near_distance := 1)
+----
+0
+
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1000)
+WHERE docname = 'only_one'
+----
+0
+
+# Consecutive terms are not free: the term between the outermost two counts, so
+# three adjacent terms need near_distance 1 and only two need 0.
+query II
+SELECT
+    (SELECT count(*) FROM fts_main_near_docs.search_layered_bm25('machine assisted deep', query_mode := 'near', near_distance := 0)),
+    (SELECT count(*) FROM fts_main_near_docs.search_layered_bm25('machine assisted deep', query_mode := 'near', near_distance := 1))
+----
+0	1
+
+# Near mode matches exact dictionary terms, so a term in no document disqualifies
+# every document rather than dropping out and letting the rest match alone.
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine absentword', query_mode := 'near', near_distance := 1000)
+----
+0
+
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine learning absentword', query_mode := 'near', near_distance := 1000)
+----
+0
+
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine lerning', query_mode := 'near', near_distance := 0)
+----
+0
+
+query I
+SELECT fts_main_near_docs.match_layered_bm25('adjacent', 'machine absentword', query_mode := 'near', near_distance := 1000) IS NULL
+----
+true
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', fields := 'missing')
+----
+fields contains unknown field: missing
+
+# Compared as a pair that both take the near path: a single-term query falls back
+# to standard mode and would not be a valid control here.
+query I
+SELECT abs(
+    (SELECT score FROM fts_main_near_docs.search_layered_bm25('machine machine learning', query_mode := 'near', near_distance := 10) WHERE docname = 'adjacent')
+  - (SELECT score FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 10) WHERE docname = 'adjacent')
+) < 1e-12
+----
+true
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1.7)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := NULL)
+----
+near_distance must be a non-negative integer
+
+# The span arithmetic adds one, so the maximum must saturate rather than overflow.
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 9223372036854775807)
+----
+5
+
+# Two thousand occurrences of each term, so work proportional to near_distance would time out.
+statement ok
+CREATE TABLE near_dense AS
+SELECT 'dense' AS id,
+       string_agg(CASE WHEN i % 2 = 0 THEN 'aster' ELSE 'brook' END, ' ') AS body
+FROM range(4000) t(i)
+
+statement ok
+PRAGMA create_fts_index('near_dense', 'id', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query I
+SELECT count(*)
+FROM fts_main_near_dense.search_layered_bm25('aster brook', query_mode := 'near', near_distance := 9223372036854775807)
+----
+1
+
+# Incremental maintenance reaches near results through the triggers.
+statement ok
+CREATE TABLE near_inc(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_inc VALUES ('stale', 'machine learning basics')
+
+statement ok
+PRAGMA create_fts_index('near_inc', 'id', 'body', stemmer='none', stopwords='none', layered_search=true, incremental=true)
+
+statement ok
+INSERT INTO near_inc VALUES ('fresh', 'machine deep learning')
+
+statement ok
+DELETE FROM near_inc WHERE id = 'stale'
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_inc.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1)
+----
+[fresh]
+
+# Clustered term storage returns the same matches.
+statement ok
+CREATE TABLE near_clu(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_clu VALUES ('tight', 'machine learning basics'), ('gap1', 'machine x learning'), ('lone', 'machine only')
+
+statement ok
+PRAGMA create_fts_index('near_clu', 'id', 'body', stemmer='none', stopwords='none', layered_search=true, cluster_terms=true)
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_clu.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1)
+----
+[gap1, tight]
+
+# term_limit caps expansions, which near mode does not use.
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 0, term_limit := 1)
+----
+[adjacent, reversed]
+
+query TI
+SELECT id, fts_main_near_docs.match_layered_bm25(id, 'machine learning', query_mode := 'near', near_distance := 0) IS NOT NULL
+FROM near_docs ORDER BY id
+----
+adjacent	true
+gap2	false
+gap6	false
+only_one	false
+reversed	true
+split	false
+
+# A single token has no distance to constrain, so it behaves as an ordinary query.
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine', query_mode := 'near', near_distance := 0)
+----
+6
+
+# Frequency follows the query term with the fewest matched occurrences, so two
+# documents differing only in which query term repeats score alike.
+statement ok
+CREATE TABLE near_frequency(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_frequency VALUES
+    ('rare_twice',   'alpha alpha beta qqq'),
+    ('common_twice', 'alpha beta beta qqq'),
+    ('two_matches',   'alpha beta zzz alpha beta'),
+    ('one_match',    'alpha beta zzz zzz zzz'),
+    ('filler1',      'beta www'),
+    ('filler2',      'beta eee')
+
+statement ok
+PRAGMA create_fts_index('near_frequency', 'id', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query I
+SELECT (SELECT score FROM fts_main_near_frequency.search_layered_bm25('alpha beta', query_mode := 'near', near_distance := 1) WHERE docname = 'rare_twice')
+     = (SELECT score FROM fts_main_near_frequency.search_layered_bm25('alpha beta', query_mode := 'near', near_distance := 1) WHERE docname = 'common_twice')
+----
+true
+
+query I
+SELECT (SELECT score FROM fts_main_near_frequency.search_layered_bm25('alpha beta', query_mode := 'near', near_distance := 0) WHERE docname = 'two_matches')
+     > (SELECT score FROM fts_main_near_frequency.search_layered_bm25('alpha beta', query_mode := 'near', near_distance := 0) WHERE docname = 'one_match')
+----
+true
+
+# Quotation marks are tokenizer input, so a quoted query is the same set of terms
+# and still matches in either order.
+query I
+SELECT (SELECT list(docname ORDER BY docname) FROM fts_main_near_docs.search_layered_bm25('"machine learning"', query_mode := 'near', near_distance := 0))
+     = (SELECT list(docname ORDER BY docname) FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 0))
+----
+true
+
+# The default is FTS5's 10, so ten intervening tokens match and eleven do not.
+statement ok
+CREATE TABLE near_default(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_default VALUES
+    ('gap10', 'a x x x x x x x x x x b'),
+    ('gap11', 'a x x x x x x x x x x x b')
+
+statement ok
+PRAGMA create_fts_index('near_default', 'id', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query TT
+SELECT (SELECT list(docname) FROM fts_main_near_default.search_layered_bm25('a b', query_mode := 'near')),
+       (SELECT list(docname ORDER BY docname) FROM fts_main_near_default.search_layered_bm25('a b', query_mode := 'near', near_distance := 11))
+----
+[gap10]	[gap10, gap11]
+
+# A match lies inside one indexed field and may not straddle two.
+statement ok
+CREATE TABLE near_fields(id VARCHAR NOT NULL, title VARCHAR, body VARCHAR)
+
+statement ok
+INSERT INTO near_fields VALUES ('split_fields', 'machine', 'learning'), ('one_field', 'zzz', 'machine learning')
+
+statement ok
+PRAGMA create_fts_index('near_fields', 'id', 'title', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_fields.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1000)
+----
+[one_field]
+
+# The fields argument confines the match to the named field.
+query I
+SELECT count(*)
+FROM fts_main_near_fields.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1000, fields := 'title')
+----
+0
+
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_fields.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1000, fields := 'body')
+----
+[one_field]
+
+# Exact dictionary terms only, even with expansion switched on explicitly.
+query I
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machin learning', query_mode := 'near', near_distance := 1000, expand_exact_terms := true)
+----
+0
+
+# Query terms are matched after stemming, as in the other modes.
+statement ok
+CREATE TABLE near_stemmed(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_stemmed VALUES ('stemmed', 'running machines here')
+
+statement ok
+PRAGMA create_fts_index('near_stemmed', 'id', 'body', stopwords='none', layered_search=true)
+
+query I
+SELECT count(*)
+FROM fts_main_near_stemmed.search_layered_bm25('run machine', query_mode := 'near', near_distance := 0)
+----
+1
+
+# The examples below are from the SQLite FTS5 documentation, on its own document
+# and with its own expected outcomes.
+statement ok
+CREATE TABLE fts5_docs(id VARCHAR NOT NULL, x VARCHAR)
+
+statement ok
+INSERT INTO fts5_docs VALUES ('1', 'A B C D x x x E F x')
+
+statement ok
+PRAGMA create_fts_index('fts5_docs', 'id', 'x', stemmer='none', stopwords='none', layered_search=true)
+
+# The query names the terms in the opposite order to the document, as FTS5 does.
+query III
+SELECT
+    (SELECT count(*) FROM fts_main_fts5_docs.search_layered_bm25('e d', query_mode := 'near', near_distance := 4)),
+    (SELECT count(*) FROM fts_main_fts5_docs.search_layered_bm25('e d', query_mode := 'near', near_distance := 3)),
+    (SELECT count(*) FROM fts_main_fts5_docs.search_layered_bm25('e d', query_mode := 'near', near_distance := 2))
+----
+1	1	0
+
+# Two terms are the identity case, so these three-term rows pin the definition.
+query II
+SELECT
+    (SELECT count(*) FROM fts_main_fts5_docs.search_layered_bm25('a d e', query_mode := 'near', near_distance := 6)),
+    (SELECT count(*) FROM fts_main_fts5_docs.search_layered_bm25('a d e', query_mode := 'near', near_distance := 5))
+----
+1	0
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'nearby')
+----
+query_mode must be one of standard, autocomplete, phrase, phrase_prefix, near, wildcard, or regex
