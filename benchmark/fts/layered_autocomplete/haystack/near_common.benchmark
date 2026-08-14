@@ -1,0 +1,5 @@
+template benchmark/fts/layered_autocomplete/templates/near_query.benchmark.in
+display_name=FTS common near query (1M)
+rows=1000000
+query_string=workspace benchmark
+near_distance=2
