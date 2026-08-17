@@ -109,7 +109,7 @@ leaves AS (
            CASE
                WHEN list_contains(json_keys(node_json), 'near_distance')
                    THEN coalesce(
-                       json_extract(node_json, '$.near_distance')::BIGINT,
+                       try_cast(json_extract(node_json, '$.near_distance') AS BIGINT),
                        10
                    )
                ELSE 10
@@ -191,10 +191,9 @@ raw_query_validation_errors AS (
     WHERE has_query
       AND list_contains(json_keys(node_json), 'near_distance')
       AND (
-          json_extract(node_json, '$.near_distance')::DOUBLE IS NULL
-          OR json_extract(node_json, '$.near_distance')::DOUBLE < 0
-          OR json_extract(node_json, '$.near_distance')::DOUBLE
-             <> floor(json_extract(node_json, '$.near_distance')::DOUBLE)
+          json_type(json_extract(node_json, '$.near_distance')) NOT IN ('UBIGINT', 'BIGINT')
+          OR try_cast(json_extract(node_json, '$.near_distance') AS BIGINT) IS NULL
+          OR try_cast(json_extract(node_json, '$.near_distance') AS BIGINT) < 0
       )
     UNION ALL
     SELECT 'query node contains duplicate keys' AS message

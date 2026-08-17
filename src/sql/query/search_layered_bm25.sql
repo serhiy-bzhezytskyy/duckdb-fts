@@ -1,4 +1,4 @@
-CREATE MACRO {{fts_schema}}.__search_layered_bm25_non_pattern(query_string, fields := NULL, top_k := 50, k := 1.2, b := 0.75, term_limit := 32, max_df_ratio := 0.15, max_df := 50000, enable_prefix := true, enable_substring := true, enable_fuzzy := true, enable_short_fuzzy := true, expand_exact_terms := false, query_mode := 'standard', near_distance := 10, field_weights := NULL, field_b := NULL, scoring_model := 'bm25f', tie_breaker := 0.0) AS TABLE
+CREATE MACRO {{fts_schema}}.__search_layered_bm25_non_pattern(query_string, fields := NULL, top_k := 50, k := 1.2, b := 0.75, term_limit := 32, max_df_ratio := 0.15, max_df := 50000, enable_prefix := true, enable_substring := true, enable_fuzzy := true, enable_short_fuzzy := true, expand_exact_terms := false, query_mode := 'standard', field_weights := NULL, field_b := NULL, scoring_model := 'bm25f', tie_breaker := 0.0, near_distance := 10) AS TABLE
 WITH params(term_limit, max_df_ratio, max_df, enable_prefix, enable_substring, enable_fuzzy, enable_short_fuzzy, expand_exact_terms, query_mode, near_distance, field_weights, field_b, scoring_model, tie_breaker, default_b) AS (
     SELECT term_limit::BIGINT,
            max_df_ratio::DOUBLE,
@@ -18,7 +18,7 @@ WITH params(term_limit, max_df_ratio, max_df, enable_prefix, enable_substring, e
                WHEN 'regex' THEN 'regex'
                ELSE error('query_mode must be one of standard, autocomplete, phrase, phrase_prefix, near, wildcard, or regex')
            END,
-           near_distance::BIGINT,
+           try_cast(near_distance AS BIGINT),
            field_weights::MAP(VARCHAR, DOUBLE),
            field_b::MAP(VARCHAR, DOUBLE),
            lower(scoring_model::VARCHAR),
@@ -47,8 +47,13 @@ search_validation_errors AS (
         WHERE lower(coalesce(query_mode::VARCHAR, '')) = 'near'
           AND (
               near_distance IS NULL
-              OR try_cast(near_distance AS DOUBLE) IS NULL
-              OR try_cast(near_distance AS DOUBLE) < 0
+              OR try_cast(near_distance AS HUGEINT) IS NULL
+              OR try_cast(near_distance AS HUGEINT) < 0
+              OR try_cast(near_distance AS HUGEINT) > 9223372036854775807
+              -- Compared in the argument's own type: a DOUBLE round trip cannot
+              -- distinguish 2.0000000000000000001 from an exact 2. Strings hold
+              -- their fraction only through the DOUBLE comparison.
+              OR try_cast(near_distance AS HUGEINT) <> near_distance
               OR try_cast(near_distance AS DOUBLE)
                  <> floor(try_cast(near_distance AS DOUBLE))
           )

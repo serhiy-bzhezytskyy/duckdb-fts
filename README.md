@@ -129,6 +129,7 @@ When an index is built, this retrieval macro is created that can be used to sear
 | `field_b` | `MAP(VARCHAR, DOUBLE)` | Per-field BM25 length-normalization parameters. Values must be between `0.0` and `1.0`; omitted fields inherit `b`. Defaults to `NULL` |
 | `scoring_model` | `VARCHAR` | Field scoring model: `bm25f` or `best_fields`. Defaults to `bm25f` |
 | `tie_breaker` | `DOUBLE` | Contribution from non-best fields in `best_fields` mode. Must be finite and between `0.0` and `1.0`. Defaults to `0.0` |
+| `near_distance` | `BIGINT` | Tokens permitted between the first and the last query term in `near` mode, ignored otherwise. Must be a non-negative integer. Counted once across the whole match, and intervening query terms count toward it. `0` means the terms are consecutive. This is `NEAR` `N` from SQLite's FTS5, and shares its default of `10` |
 
 BM25F is the default for both single-field and multi-field indexes. It
 normalizes term frequency independently for each selected field, combines those
@@ -146,7 +147,7 @@ search_layered_bm25(query_string, fields := NULL, top_k := 50, k := 1.2,
                     enable_short_fuzzy := true, expand_exact_terms := false,
                     query_mode := 'standard', field_weights := NULL,
                     field_b := NULL, scoring_model := 'bm25f',
-                    tie_breaker := 0.0)
+                    tie_breaker := 0.0, near_distance := 10)
 
 match_layered_bm25(input_id, query_string, fields := NULL, k := 1.2,
                    b := 0.75, term_limit := 32, max_df_ratio := 0.15,
@@ -155,7 +156,7 @@ match_layered_bm25(input_id, query_string, fields := NULL, k := 1.2,
                    enable_short_fuzzy := true, expand_exact_terms := false,
                    query_mode := 'standard', field_weights := NULL,
                    field_b := NULL, scoring_model := 'bm25f',
-                   tie_breaker := 0.0)
+                   tie_breaker := 0.0, near_distance := 10)
 ```
 
 When `layered_search` is enabled, the extension builds dictionary sidecar
@@ -186,7 +187,6 @@ filtering, and BM25 parameters as the base FTS index.
 | `enable_fuzzy` | `BOOLEAN` | Whether to include Damerau-Levenshtein fuzzy alternatives. Defaults to `true` |
 | `enable_short_fuzzy` | `BOOLEAN` | Whether to use a length-clustered path for short fuzzy alternatives. Defaults to `true` |
 | `expand_exact_terms` | `BOOLEAN` | Whether to also expand a query term that already has an exact dictionary match. Defaults to `false` |
-| `near_distance` | `BIGINT` | Tokens permitted between the first and the last query term in `near` mode, ignored otherwise. Must be a non-negative integer. Counted once across the whole match, and intervening query terms count toward it. `0` means the terms are consecutive. This is `NEAR` `N` from SQLite's FTS5, and shares its default of `10` |
 | `query_mode` | `VARCHAR` | Query execution mode. `standard` uses exact, prefix, substring, and fuzzy dictionary expansion; `autocomplete` keeps preceding tokens exact and matches the final token by raw-token prefix; `phrase` requires exact order and adjacency; `phrase_prefix` treats the final phrase token as a raw-token prefix; `near` requires every term in one field within `near_distance` tokens of each other, in any order; `wildcard` matches `*` and `?` patterns; `regex` matches a conservative flat RE2 subset. Defaults to `standard` |
 | `field_weights` | `MAP(VARCHAR, DOUBLE)` | Non-negative finite weights for indexed fields. Omitted fields have weight `1.0`. Defaults to `NULL` |
 | `field_b` | `MAP(VARCHAR, DOUBLE)` | Per-field BM25 length-normalization parameters. Values must be between `0.0` and `1.0`; omitted fields inherit `b`. Defaults to `NULL` |

@@ -138,6 +138,47 @@ SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine l
 ----
 near_distance must be a non-negative integer
 
+# Structured near_distance requires an integer JSON number, like boost.
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": "2"}')
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": true}')
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": "x"}')
+----
+near_distance must be a non-negative integer
+
+# The integer check keeps the argument's own precision and the BIGINT range.
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 2.0000000000000000001)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 9223372036854775808)
+----
+near_distance must be a non-negative integer
+
+# Positional calls from before near mode stay valid: near_distance is appended last.
+query T
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_docs.search_layered_bm25('machine', NULL, 50, 1.2, 0.75, 32, 0.15, 50000, true, true, true, true, false, 'standard', MAP {'body': 2.0}, NULL, 'bm25f', 0.0)
+----
+[adjacent, gap2, gap6, only_one, reversed, split]
+
+query I
+SELECT count(*)
+FROM near_docs
+WHERE fts_main_near_docs.match_layered_bm25(id, 'machine', NULL, 1.2, 0.75, 32, 0.15, 50000, true, true, true, true, false, 'standard', MAP {'body': 2.0}, NULL, 'bm25f', 0.0) IS NOT NULL
+----
+6
+
 # The span arithmetic adds one, so the maximum must saturate rather than overflow.
 query I
 SELECT count(*)
