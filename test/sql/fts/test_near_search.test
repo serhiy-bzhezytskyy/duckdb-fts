@@ -118,6 +118,26 @@ SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_m
 ----
 near_distance must be a non-negative integer
 
+# The error must fire regardless of which columns the caller projects.
+statement error
+SELECT count(*)
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT EXISTS (
+    FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT score
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+----
+near_distance must be a non-negative integer
+
 statement error
 SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1.7)
 ----
