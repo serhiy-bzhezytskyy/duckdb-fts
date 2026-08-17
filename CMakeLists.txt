@@ -12,6 +12,7 @@ set(FTS_SQL_ASSETS
     "ENGLISH_STOPWORDS|src/sql/index/english_stopwords.sql"
     "IMPORT_STOPWORDS|src/sql/index/import_stopwords.sql"
     "TOKENIZE_MACRO|src/sql/index/tokenize_macro.sql"
+    "TOKENIZE_SPANS_MACRO|src/sql/index/tokenize_spans_macro.sql"
     "ANALYZE_TOKEN_STREAM|src/sql/index/analyze_token_stream.sql"
     "ANALYZE_TEXT_MACRO|src/sql/index/analyze_text_macro.sql"
     "INDEX_TABLES|src/sql/index/index_tables.sql"
@@ -79,6 +80,7 @@ set(EXTENSION_SOURCES
     ${EXTENSION_BASE_FOLDER}/fts_near.cpp
     ${EXTENSION_BASE_FOLDER}/fts_pattern.cpp
     ${EXTENSION_BASE_FOLDER}/fts_sql_template.cpp
+    ${EXTENSION_BASE_FOLDER}/fts_tokenize_spans.cpp
     ${EXTENSION_BASE_FOLDER}/fts_unicode_classifier.cpp
     ${FTS_SQL_ASSETS_SOURCE}
     ${SNOWBALL_BASE_FOLDER}/libstemmer/libstemmer.c

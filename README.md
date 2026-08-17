@@ -96,10 +96,10 @@ removed before positions are assigned. Stopwords are removed afterward, so
 leading and internal stopwords remain visible as position gaps.
 
 Current analyzers use a position length of one and the token type `word`.
-Offsets are reserved as nullable, half-open, zero-based UTF-8 byte offsets into
-the original input. They are currently `NULL` because normalization prevents
-the regex and OpenSearch-compatible tokenizers from mapping every token
-reliably back to the original string.
+Offsets are half-open, zero-based UTF-8 byte offsets into the original input.
+Normalization is tracked codepoint by codepoint, so a token's offsets address
+the original bytes even when accent stripping or lowercasing changes the byte
+width. Offsets cover whole original codepoints.
 
 `analyze_text` uses the same generated analyzer definition as bulk indexing,
 incremental maintenance, and query analysis. The lower-level list-returning

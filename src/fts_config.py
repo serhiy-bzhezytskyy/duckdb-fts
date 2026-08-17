@@ -20,6 +20,7 @@ source_files = [
         'extension/fts/fts_extension.cpp',
         'extension/fts/fts_indexing.cpp',
         'extension/fts/fts_pattern.cpp',
+        'extension/fts/fts_tokenize_spans.cpp',
         'extension/fts/fts_unicode_classifier.cpp',
     ]
 ]
