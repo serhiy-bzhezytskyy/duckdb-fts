@@ -103,6 +103,11 @@ static string TokenizeSpansMacroScript(const QualifiedName &qname,
        {"lower", SQLTemplateArgument::Boolean(lower)}});
 }
 
+static string HighlightMacrosScript(const QualifiedName &qname) {
+  return RenderSQLTemplate(fts_sql::HIGHLIGHT_MACROS,
+                           {{"fts_schema", GetFTSSchemaArgument(qname)}});
+}
+
 static string AnalyzeTextMacroScript(const QualifiedName &qname,
                                      const FTSAnalyzerConfig &config) {
   return RenderSQLTemplate(
@@ -425,6 +430,7 @@ string FTSIndexBuilder::Create(const FTSIndexConfig &config,
   result += TokenizeSpansMacroScript(qname, config.tokenizer, config.ignore,
                                      config.strip_accents, config.lower);
   result += AnalyzeTextMacroScript(qname, analyzer_config);
+  result += HighlightMacrosScript(qname);
   result += IndexTablesScript(
       qname, config.input_id, config.input_values, GetFTSBuildTermsTable(qname),
       GetFTSBuildDictTable(qname), GetFTSBuildRawDictTable(qname),

@@ -107,6 +107,38 @@ incremental maintenance, and query analysis. The lower-level list-returning
 stopword removal or stemming. Analyzer contract changes are versioned in
 `index_metadata` and require dropping and recreating an existing index.
 
+### `highlight` and `snippet` Functions
+
+```python
+highlight(s, query_string, before, after, query_mode := 'standard')
+
+snippet(s, query_string, before, after, ellipsis, max_tokens,
+        query_mode := 'standard')
+```
+
+Each index schema also contains these two scalar macros, following SQLite
+FTS5's `highlight` and `snippet`. `highlight` wraps every matched token of
+`s` between `before` and `after`, in the original text: case, punctuation,
+and byte widths are preserved through the analyzer's offsets. `snippet`
+renders the `max_tokens`-token window centered on the first match, marking
+truncated edges with `ellipsis`.
+
+A token matches when its analyzed term equals an analyzed query term, so
+stemming applies: on a porter index, `machine` also marks `machines`.
+Dictionary expansions (prefix, substring, fuzzy) are not marked. In `phrase`
+and `phrase_prefix` modes a whole phrase occurrence is wrapped as one span,
+and overlapping spans merge. In `near` mode every matched term is marked,
+without the distance constraint. Wildcard and regex modes are not supported.
+Unmatched text is returned unchanged.
+
+```sql
+SELECT fts_main_documents.highlight(body, 'quack', '<b>', '</b>')
+FROM documents;
+
+SELECT fts_main_documents.snippet(body, 'quack', '[', ']', '...', 8)
+FROM documents;
+```
+
 ### `match_bm25` Function
 
 ```python

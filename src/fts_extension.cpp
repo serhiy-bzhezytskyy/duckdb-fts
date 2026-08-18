@@ -13,6 +13,7 @@
 #include "fts_indexing.hpp"
 #include "fts_near.hpp"
 #include "fts_pattern.hpp"
+#include "fts_highlight.hpp"
 #include "fts_opensearch_tokenizer.hpp"
 #include "fts_tokenize_spans.hpp"
 #include "fts_unicode_classifier.hpp"
@@ -127,6 +128,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
   loader.RegisterFunction(stem_func);
   loader.RegisterFunction(opensearch_standard_tokenize_func);
+  loader.RegisterFunction(GetFTSRenderHighlightFunction());
   loader.RegisterFunction(GetFTSTokenizeSpansFunction());
   loader.RegisterFunction(GetFTSAnalyzePatternFunction());
   loader.RegisterFunction(GetFTSNearTfFunction());
