@@ -644,8 +644,12 @@ FROM ranked
 CROSS JOIN query_params
 WHERE query_params.result_limit IS NULL OR rank <= query_params.result_limit
 UNION ALL
-SELECT error(message)::VARCHAR AS docname,
-       NULL::DOUBLE AS score,
-       NULL::BIGINT AS rank
+-- Every column carries the error and the filter repeats it: a projected-only
+-- error is dropped when the column is unused, and a pushed predicate on a
+-- constant column would fold to false and drop the branch before it runs.
+SELECT CASE WHEN error(message) THEN NULL::VARCHAR END AS docname,
+       CASE WHEN error(message) THEN NULL::DOUBLE END AS score,
+       CASE WHEN error(message) THEN NULL::BIGINT END AS rank
 FROM selected_validation_error
+WHERE error(message)
 ORDER BY rank;

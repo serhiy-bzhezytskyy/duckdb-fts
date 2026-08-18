@@ -138,6 +138,77 @@ FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'n
 ----
 near_distance must be a non-negative integer
 
+# The error must also survive predicates pushed into the result.
+statement error
+SELECT fts_main_near_docs.match_layered_bm25(
+    'adjacent',
+    'machine learning',
+    query_mode := 'near',
+    near_distance := -1
+)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT fts_main_near_docs.match_layered_bm25(
+    'missing',
+    'machine learning',
+    query_mode := 'near',
+    near_distance := -1
+)
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT *
+FROM fts_main_near_docs.search_layered_bm25(
+    'machine learning',
+    query_mode := 'near',
+    near_distance := -1
+)
+WHERE docname = 'adjacent'
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT *
+FROM fts_main_near_docs.search_layered_bm25_query('{"query": "machine learning", "query_mode": "near", "near_distance": -1}')
+WHERE docname = 'adjacent'
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT *
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+WHERE score > 0
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT *
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+WHERE rank <= 5
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT *
+FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := -1)
+LIMIT 1
+----
+near_distance must be a non-negative integer
+
+# The BIGINT contract rejects strings and booleans instead of coercing them.
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := '2.0000000000000000001')
+----
+near_distance must be a non-negative integer
+
+statement error
+SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := true)
+----
+near_distance must be a non-negative integer
+
 statement error
 SELECT * FROM fts_main_near_docs.search_layered_bm25('machine learning', query_mode := 'near', near_distance := 1.7)
 ----

@@ -47,6 +47,7 @@ search_validation_errors AS (
         WHERE lower(coalesce(query_mode::VARCHAR, '')) = 'near'
           AND (
               near_distance IS NULL
+              OR typeof(near_distance) IN ('VARCHAR', 'BOOLEAN')
               OR try_cast(near_distance AS HUGEINT) IS NULL
               OR try_cast(near_distance AS HUGEINT) < 0
               OR try_cast(near_distance AS HUGEINT) > 9223372036854775807
@@ -715,10 +716,11 @@ results AS (
 SELECT *
 FROM results
 UNION ALL
--- In a filter, not the projection: a projected error() is dropped when docname is unused.
-SELECT NULL::VARCHAR AS docname,
-       NULL::DOUBLE AS score,
-       NULL::BIGINT AS rank
+-- Every column carries the error: a pushed predicate on a constant column
+-- would fold to false and drop this branch before its filter runs.
+SELECT CASE WHEN error(message) THEN NULL::VARCHAR END AS docname,
+       CASE WHEN error(message) THEN NULL::DOUBLE END AS score,
+       CASE WHEN error(message) THEN NULL::BIGINT END AS rank
 FROM search_validation_errors
 WHERE error(message)
 ORDER BY rank;

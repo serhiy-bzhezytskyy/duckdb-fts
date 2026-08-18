@@ -129,7 +129,6 @@ When an index is built, this retrieval macro is created that can be used to sear
 | `field_b` | `MAP(VARCHAR, DOUBLE)` | Per-field BM25 length-normalization parameters. Values must be between `0.0` and `1.0`; omitted fields inherit `b`. Defaults to `NULL` |
 | `scoring_model` | `VARCHAR` | Field scoring model: `bm25f` or `best_fields`. Defaults to `bm25f` |
 | `tie_breaker` | `DOUBLE` | Contribution from non-best fields in `best_fields` mode. Must be finite and between `0.0` and `1.0`. Defaults to `0.0` |
-| `near_distance` | `BIGINT` | Tokens permitted between the first and the last query term in `near` mode, ignored otherwise. Must be a non-negative integer. Counted once across the whole match, and intervening query terms count toward it. `0` means the terms are consecutive. This is `NEAR` `N` from SQLite's FTS5, and shares its default of `10` |
 
 BM25F is the default for both single-field and multi-field indexes. It
 normalizes term frequency independently for each selected field, combines those
@@ -192,6 +191,7 @@ filtering, and BM25 parameters as the base FTS index.
 | `field_b` | `MAP(VARCHAR, DOUBLE)` | Per-field BM25 length-normalization parameters. Values must be between `0.0` and `1.0`; omitted fields inherit `b`. Defaults to `NULL` |
 | `scoring_model` | `VARCHAR` | Field scoring model: `bm25f` or `best_fields`. Defaults to `bm25f` |
 | `tie_breaker` | `DOUBLE` | Contribution from non-best fields in `best_fields` mode. Must be finite and between `0.0` and `1.0`. Defaults to `0.0` |
+| `near_distance` | `BIGINT` | Tokens permitted between the first and the last query term in `near` mode, ignored otherwise. Must be a non-negative integer. Counted once across the whole match, and intervening query terms count toward it. `0` means the terms are consecutive. This is `NEAR` `N` from SQLite's FTS5, and shares its default of `10` |
 
 <!-- markdownlint-enable MD056 -->
 
