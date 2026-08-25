@@ -600,3 +600,25 @@ SELECT abs((SELECT score FROM fts_main_near_boolean.search_layered_bm25_query('{
      + (SELECT score FROM fts_main_near_boolean.search_layered_bm25('kiwi') WHERE docname = 'both_clauses'))) < 1e-12
 ----
 true
+
+# A single query term repeated must still fall back to standard mode: repeated
+# terms count once, so the fallback is gated on distinct terms, not raw token
+# positions (lnkuiper, #56).
+statement ok
+CREATE TABLE near_single_term(id VARCHAR NOT NULL, body VARCHAR)
+
+statement ok
+INSERT INTO near_single_term VALUES ('a', 'machine')
+
+statement ok
+PRAGMA create_fts_index('near_single_term', 'id', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query I
+SELECT count(*) FROM fts_main_near_single_term.search_layered_bm25('machin', query_mode := 'near', near_distance := 0)
+----
+1
+
+query I
+SELECT count(*) FROM fts_main_near_single_term.search_layered_bm25('machin machin', query_mode := 'near', near_distance := 0)
+----
+1

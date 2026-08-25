@@ -102,7 +102,7 @@ query_shape AS (
                 AND count(*) = 1
                    THEN 'autocomplete'
                WHEN params.query_mode = 'near'
-                AND count(*) = 1
+                AND count(DISTINCT term) = 1
                    THEN 'standard'
                ELSE params.query_mode
            END AS effective_mode
