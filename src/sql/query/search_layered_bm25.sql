@@ -570,15 +570,35 @@ near_window AS (
     SELECT least(greatest(params.near_distance, 0), 4611686018427387903) + 1 AS width
     FROM params
 ),
+near_anchor AS (
+    SELECT termid
+    FROM near_slots
+    WHERE (SELECT count(*) FROM near_slots)
+        = (SELECT slot_count FROM near_slot_count)
+    ORDER BY df ASC,
+             slot ASC,
+             termid ASC
+    LIMIT 1
+),
+near_candidate_fields AS (
+    SELECT DISTINCT terms.docid,
+                    terms.fieldid
+    FROM near_anchor
+    JOIN {{fts_schema}}.terms AS terms
+      ON terms.termid = near_anchor.termid
+    WHERE terms.fieldid IN (SELECT fieldid FROM field_config)
+),
 near_grouped AS (
     SELECT terms.docid,
            terms.fieldid,
            list(terms.position::BIGINT) AS positions,
            list(near_slots.termid) AS termids
-    FROM near_slots
+    FROM near_candidate_fields AS candidates
     JOIN {{fts_schema}}.terms AS terms
-      ON terms.termid = near_slots.termid
-    WHERE terms.fieldid IN (SELECT fieldid FROM field_config)
+      ON terms.docid = candidates.docid
+     AND terms.fieldid = candidates.fieldid
+    JOIN near_slots
+      ON near_slots.termid = terms.termid
     GROUP BY terms.docid,
              terms.fieldid
 ),

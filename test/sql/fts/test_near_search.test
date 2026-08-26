@@ -622,3 +622,23 @@ query I
 SELECT count(*) FROM fts_main_near_single_term.search_layered_bm25('machin machin', query_mode := 'near', near_distance := 0)
 ----
 1
+
+# The candidate-field restriction introduced for anchor-term pruning must key on
+# (docid, fieldid): a rare and a common term in DIFFERENT fields of the same
+# document must not match, only the same-field co-occurrence should (lnkuiper, #56).
+statement ok
+CREATE TABLE near_anchor_fields(id VARCHAR NOT NULL, title VARCHAR, body VARCHAR)
+
+statement ok
+INSERT INTO near_anchor_fields VALUES
+    ('cross_field', 'rareword', 'common text here'),
+    ('same_field',  'unrelated', 'rareword common text here')
+
+statement ok
+PRAGMA create_fts_index('near_anchor_fields', 'id', 'title', 'body', stemmer='none', stopwords='none', layered_search=true)
+
+query I
+SELECT list(docname ORDER BY docname)
+FROM fts_main_near_anchor_fields.search_layered_bm25('rareword common', query_mode := 'near', near_distance := 5)
+----
+[same_field]
