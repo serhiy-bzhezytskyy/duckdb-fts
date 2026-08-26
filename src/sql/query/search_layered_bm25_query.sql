@@ -106,6 +106,14 @@ leaves AS (
                    )
                ELSE 'standard'
            END AS query_mode,
+           CASE
+               WHEN list_contains(json_keys(node_json), 'near_distance')
+                   THEN coalesce(
+                       try_cast(json_extract(node_json, '$.near_distance') AS BIGINT),
+                       10
+                   )
+               ELSE 10
+           END AS near_distance,
            boost
     FROM node_config
     WHERE has_query
@@ -175,8 +183,18 @@ raw_query_validation_errors AS (
     UNION ALL
     SELECT 'query node contains unknown key: ' || node_key AS message
     FROM node_keys
-    WHERE (has_query AND NOT has_boolean AND node_key NOT IN ('query', 'fields', 'query_mode', 'boost'))
+    WHERE (has_query AND NOT has_boolean AND node_key NOT IN ('query', 'fields', 'query_mode', 'near_distance', 'boost'))
        OR (NOT has_query AND node_key NOT IN ('must', 'should', 'must_not', 'minimum_should_match', 'boost'))
+    UNION ALL
+    SELECT 'near_distance must be a non-negative integer' AS message
+    FROM query_nodes
+    WHERE has_query
+      AND list_contains(json_keys(node_json), 'near_distance')
+      AND (
+          json_type(json_extract(node_json, '$.near_distance')) NOT IN ('UBIGINT', 'BIGINT')
+          OR try_cast(json_extract(node_json, '$.near_distance') AS BIGINT) IS NULL
+          OR try_cast(json_extract(node_json, '$.near_distance') AS BIGINT) < 0
+      )
     UNION ALL
     SELECT 'query node contains duplicate keys' AS message
     FROM query_nodes
@@ -214,7 +232,7 @@ raw_query_validation_errors AS (
     WHERE field_type = 'VARCHAR'
       AND field_name NOT IN (SELECT field FROM {{fts_schema}}.fields)
     UNION ALL
-    SELECT 'query_mode must be one of standard, autocomplete, phrase, phrase_prefix, wildcard, or regex' AS message
+    SELECT 'query_mode must be one of standard, autocomplete, phrase, phrase_prefix, near, wildcard, or regex' AS message
     FROM query_nodes
     WHERE has_query
       AND list_contains(json_keys(node_json), 'query_mode')
@@ -225,6 +243,7 @@ raw_query_validation_errors AS (
               'autocomplete',
               'phrase',
               'phrase_prefix',
+              'near',
               'wildcard',
               'regex'
           )
@@ -312,6 +331,7 @@ prepared_leaves AS (
            leaves.depth,
            leaves.query_string,
            leaves.query_mode,
+           leaves.near_distance,
            leaves.boost,
            field_lists.fields
     FROM leaves
@@ -498,6 +518,7 @@ non_pattern_leaf_scores AS (
         enable_short_fuzzy := query_params.use_short_fuzzy,
         expand_exact_terms := query_params.use_exact_expansion,
         query_mode := leaves.query_mode,
+        near_distance := leaves.near_distance,
         field_weights := query_params.scoring_weights,
         field_b := query_params.scoring_field_b,
         scoring_model := query_params.scoring_model,
@@ -623,8 +644,12 @@ FROM ranked
 CROSS JOIN query_params
 WHERE query_params.result_limit IS NULL OR rank <= query_params.result_limit
 UNION ALL
-SELECT error(message)::VARCHAR AS docname,
-       NULL::DOUBLE AS score,
-       NULL::BIGINT AS rank
+-- Every column carries the error and the filter repeats it: a projected-only
+-- error is dropped when the column is unused, and a pushed predicate on a
+-- constant column would fold to false and drop the branch before it runs.
+SELECT CASE WHEN error(message) THEN NULL::VARCHAR END AS docname,
+       CASE WHEN error(message) THEN NULL::DOUBLE END AS score,
+       CASE WHEN error(message) THEN NULL::BIGINT END AS rank
 FROM selected_validation_error
+WHERE error(message)
 ORDER BY rank;

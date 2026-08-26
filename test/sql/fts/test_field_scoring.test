@@ -377,6 +377,11 @@ SELECT count(*) FROM fts_main_documents.search_layered_bm25('alpha', b := 5.0)
 b must be finite and between 0 and 1
 
 statement error
+SELECT * FROM fts_main_documents.search_layered_bm25('alpha', fields := 'missing') WHERE docname = 'doc1'
+----
+fields contains unknown field: missing
+
+statement error
 SELECT score FROM fts_main_documents.search_layered_bm25('alpha', fields := 'missing')
 ----
 fields contains unknown field: missing

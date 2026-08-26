@@ -49,6 +49,17 @@ FROM fts_main_documents.search_layered_bm25(
 ----
 d1
 
+# A persisted near query binds fts_near_tf through the same autoload.
+query I
+SELECT count(*)
+FROM fts_main_documents.search_layered_bm25(
+    'database catalog',
+    query_mode := 'near',
+    near_distance := 0
+)
+----
+0
+
 restart no_extension_load
 
 statement ok

@@ -1,0 +1,4 @@
+benchmark/fts/layered_autocomplete/smoke/near_adjacent.benchmark
+benchmark/fts/layered_autocomplete/smoke/near_reversed.benchmark
+benchmark/fts/layered_autocomplete/smoke/near_common.benchmark
+benchmark/fts/layered_autocomplete/smoke/near_dense_unbounded.benchmark

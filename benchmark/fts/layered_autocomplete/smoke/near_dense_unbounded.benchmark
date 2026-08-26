@@ -1,0 +1,5 @@
+template benchmark/fts/layered_autocomplete/templates/near_dense.benchmark.in
+display_name=FTS dense unbounded near query (200x4K)
+rows=200
+tokens=4000
+near_distance=9223372036854775807

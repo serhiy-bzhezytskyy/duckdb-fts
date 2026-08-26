@@ -144,10 +144,11 @@ results AS (
 SELECT *
 FROM results
 UNION ALL
-SELECT NULL::VARCHAR AS docname,
-       NULL::DOUBLE AS score,
-       NULL::BIGINT AS rank
+-- Every column carries the error: a pushed predicate on a constant column
+-- would fold to false and drop this branch before its filter runs.
+SELECT CASE WHEN error(message) THEN NULL::VARCHAR END AS docname,
+       CASE WHEN error(message) THEN NULL::DOUBLE END AS score,
+       CASE WHEN error(message) THEN NULL::BIGINT END AS rank
 FROM search_validation_errors
--- In a filter, not the projection: a projected error() is dropped when docname is unused.
 WHERE error(message)
 ORDER BY rank;

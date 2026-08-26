@@ -1,5 +1,5 @@
-CREATE MACRO {{fts_schema}}.__search_layered_bm25_non_pattern(query_string, fields := NULL, top_k := 50, k := 1.2, b := 0.75, term_limit := 32, max_df_ratio := 0.15, max_df := 50000, enable_prefix := true, enable_substring := true, enable_fuzzy := true, enable_short_fuzzy := true, expand_exact_terms := false, query_mode := 'standard', field_weights := NULL, field_b := NULL, scoring_model := 'bm25f', tie_breaker := 0.0) AS TABLE
-WITH params(term_limit, max_df_ratio, max_df, enable_prefix, enable_substring, enable_fuzzy, enable_short_fuzzy, expand_exact_terms, query_mode, field_weights, field_b, scoring_model, tie_breaker, default_b) AS (
+CREATE MACRO {{fts_schema}}.__search_layered_bm25_non_pattern(query_string, fields := NULL, top_k := 50, k := 1.2, b := 0.75, term_limit := 32, max_df_ratio := 0.15, max_df := 50000, enable_prefix := true, enable_substring := true, enable_fuzzy := true, enable_short_fuzzy := true, expand_exact_terms := false, query_mode := 'standard', field_weights := NULL, field_b := NULL, scoring_model := 'bm25f', tie_breaker := 0.0, near_distance := 10) AS TABLE
+WITH params(term_limit, max_df_ratio, max_df, enable_prefix, enable_substring, enable_fuzzy, enable_short_fuzzy, expand_exact_terms, query_mode, near_distance, field_weights, field_b, scoring_model, tie_breaker, default_b) AS (
     SELECT term_limit::BIGINT,
            max_df_ratio::DOUBLE,
            max_df::BIGINT,
@@ -13,10 +13,12 @@ WITH params(term_limit, max_df_ratio, max_df, enable_prefix, enable_substring, e
                WHEN 'autocomplete' THEN 'autocomplete'
                WHEN 'phrase' THEN 'phrase'
                WHEN 'phrase_prefix' THEN 'phrase_prefix'
+               WHEN 'near' THEN 'near'
                WHEN 'wildcard' THEN 'wildcard'
                WHEN 'regex' THEN 'regex'
-               ELSE error('query_mode must be one of standard, autocomplete, phrase, phrase_prefix, wildcard, or regex')
+               ELSE error('query_mode must be one of standard, autocomplete, phrase, phrase_prefix, near, wildcard, or regex')
            END,
+           try_cast(near_distance AS BIGINT),
            field_weights::MAP(VARCHAR, DOUBLE),
            field_b::MAP(VARCHAR, DOUBLE),
            lower(scoring_model::VARCHAR),
@@ -28,16 +30,34 @@ search_validation_errors AS (
     SELECT message
     FROM (
         SELECT 10 AS priority,
-               'query_mode must be one of standard, autocomplete, phrase, phrase_prefix, wildcard, or regex' AS message
+               'query_mode must be one of standard, autocomplete, phrase, phrase_prefix, near, wildcard, or regex' AS message
         WHERE query_mode IS NULL
            OR lower(query_mode::VARCHAR) NOT IN (
                'standard',
                'autocomplete',
                'phrase',
                'phrase_prefix',
+               'near',
                'wildcard',
                'regex'
            )
+        UNION ALL
+        SELECT 20 AS priority,
+               'near_distance must be a non-negative integer' AS message
+        WHERE lower(coalesce(query_mode::VARCHAR, '')) = 'near'
+          AND (
+              near_distance IS NULL
+              OR typeof(near_distance) IN ('VARCHAR', 'BOOLEAN')
+              OR try_cast(near_distance AS HUGEINT) IS NULL
+              OR try_cast(near_distance AS HUGEINT) < 0
+              OR try_cast(near_distance AS HUGEINT) > 9223372036854775807
+              -- Compared in the argument's own type: a DOUBLE round trip cannot
+              -- distinguish 2.0000000000000000001 from an exact 2. Strings hold
+              -- their fraction only through the DOUBLE comparison.
+              OR try_cast(near_distance AS HUGEINT) <> near_distance
+              OR try_cast(near_distance AS DOUBLE)
+                 <> floor(try_cast(near_distance AS DOUBLE))
+          )
         UNION ALL
         SELECT 30 AS priority,
                message
@@ -81,6 +101,9 @@ query_shape AS (
                WHEN params.query_mode = 'phrase_prefix'
                 AND count(*) = 1
                    THEN 'autocomplete'
+               WHEN params.query_mode = 'near'
+                AND count(DISTINCT term) = 1
+                   THEN 'standard'
                ELSE params.query_mode
            END AS effective_mode
     FROM query_analyzer_tokens
@@ -519,6 +542,103 @@ phrase_field_term_tf AS (
     GROUP BY phrase_matches.docid,
              phrase_matches.fieldid
 ),
+fts_extension_autoload AS (
+    -- Bind DuckDB's stable FTS autoload entry before the near scan.
+    SELECT stem('', 'none') AS marker
+),
+near_slots AS (
+    -- One slot per distinct query term, so a repeated term adds its IDF once.
+    SELECT min(query_analyzer_tokens.token_position) AS slot,
+           term_stats.termid,
+           any_value(term_stats.df) AS df
+    FROM query_analyzer_tokens
+    JOIN {{fts_schema}}.term_stats AS term_stats
+      ON term_stats.term = query_analyzer_tokens.term
+    CROSS JOIN query_shape
+    WHERE query_shape.effective_mode = 'near'
+    GROUP BY term_stats.termid
+),
+near_slot_count AS (
+    -- Counted over query terms, not found ones: an absent term must leave a slot no posting can fill.
+    SELECT count(DISTINCT query_analyzer_tokens.term)::BIGINT AS slot_count
+    FROM query_analyzer_tokens
+    CROSS JOIN query_shape
+    WHERE query_shape.effective_mode = 'near'
+),
+near_window AS (
+    -- near_distance excludes the first and last term, so the span is near_distance + 1; the cap keeps it inside INT64.
+    SELECT least(greatest(params.near_distance, 0), 4611686018427387903) + 1 AS width
+    FROM params
+),
+near_anchor AS (
+    SELECT termid
+    FROM near_slots
+    WHERE (SELECT count(*) FROM near_slots)
+        = (SELECT slot_count FROM near_slot_count)
+    ORDER BY df ASC,
+             slot ASC,
+             termid ASC
+    LIMIT 1
+),
+near_candidate_fields AS (
+    SELECT DISTINCT terms.docid,
+                    terms.fieldid
+    FROM near_anchor
+    JOIN {{fts_schema}}.terms AS terms
+      ON terms.termid = near_anchor.termid
+    WHERE terms.fieldid IN (SELECT fieldid FROM field_config)
+),
+near_grouped AS (
+    SELECT terms.docid,
+           terms.fieldid,
+           list(terms.position::BIGINT) AS positions,
+           list(near_slots.termid) AS termids
+    FROM near_candidate_fields AS candidates
+    JOIN {{fts_schema}}.terms AS terms
+      ON terms.docid = candidates.docid
+     AND terms.fieldid = candidates.fieldid
+    JOIN near_slots
+      ON near_slots.termid = terms.termid
+    GROUP BY terms.docid,
+             terms.fieldid
+),
+near_idf AS (
+    SELECT sum(
+               log(((((stats.num_docs - near_slots.df) + 0.5) / (near_slots.df + 0.5)) + 1))
+           ) AS near_idf
+    FROM near_slots
+    CROSS JOIN {{fts_schema}}.stats AS stats
+),
+near_field_term_tf AS (
+    SELECT scored.termid,
+           scored.rawtermid,
+           scored.docid,
+           scored.fieldid,
+           scored.idf,
+           scored.expansion_weight,
+           scored.tf
+    FROM (
+        SELECT NULL::BIGINT AS termid,
+               NULL::BIGINT AS rawtermid,
+               near_grouped.docid,
+               near_grouped.fieldid,
+               near_idf.near_idf AS idf,
+               1.0::DOUBLE AS expansion_weight,
+               fts_near_tf(
+                   near_grouped.positions,
+                   near_grouped.termids,
+                   near_slot_count.slot_count,
+                   near_window.width
+               )::DOUBLE AS tf
+        FROM near_grouped
+        CROSS JOIN fts_extension_autoload
+        CROSS JOIN near_slot_count
+        CROSS JOIN near_window
+        CROSS JOIN near_idf
+        WHERE near_idf.near_idf IS NOT NULL
+    ) AS scored
+    WHERE scored.tf > 0
+),
 selected_terms AS (
     SELECT query_term,
            termid,
@@ -593,6 +713,9 @@ field_term_tf AS (
     UNION ALL
     SELECT *
     FROM phrase_field_term_tf
+    UNION ALL
+    SELECT *
+    FROM near_field_term_tf
 ),
 {{field_scoring_score_ctes}},
 ranked AS (
@@ -613,10 +736,11 @@ results AS (
 SELECT *
 FROM results
 UNION ALL
--- In a filter, not the projection: a projected error() is dropped when docname is unused.
-SELECT NULL::VARCHAR AS docname,
-       NULL::DOUBLE AS score,
-       NULL::BIGINT AS rank
+-- Every column carries the error: a pushed predicate on a constant column
+-- would fold to false and drop this branch before its filter runs.
+SELECT CASE WHEN error(message) THEN NULL::VARCHAR END AS docname,
+       CASE WHEN error(message) THEN NULL::DOUBLE END AS score,
+       CASE WHEN error(message) THEN NULL::BIGINT END AS rank
 FROM search_validation_errors
 WHERE error(message)
 ORDER BY rank;
